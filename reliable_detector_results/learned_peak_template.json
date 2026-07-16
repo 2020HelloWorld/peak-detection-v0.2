@@ -1,0 +1,80 @@
+[
+  {
+    "retention_time_min": 0.365,
+    "rt_tolerance_min": 0.045,
+    "width_median_min": 0.06375271950598232,
+    "width_low_min": 0.046933172435153686,
+    "width_high_min": 0.08957691680168957,
+    "symmetry_median": 0.8147841786691483,
+    "symmetry_low": 0.565854953505001,
+    "support": 5,
+    "reference_count": 5,
+    "component": "",
+    "slot": "T1"
+  },
+  {
+    "retention_time_min": 0.485,
+    "rt_tolerance_min": 0.045,
+    "width_median_min": 0.3981822883340023,
+    "width_low_min": 0.27010505949395647,
+    "width_high_min": 0.5509261123786919,
+    "symmetry_median": 0.9187839830960001,
+    "symmetry_low": 0.6094144017874243,
+    "support": 5,
+    "reference_count": 5,
+    "component": "",
+    "slot": "T2"
+  },
+  {
+    "retention_time_min": 1.81666666666667,
+    "rt_tolerance_min": 0.0908333333333335,
+    "width_median_min": 0.2906742821111793,
+    "width_low_min": 0.20549083235829896,
+    "width_high_min": 0.4146795644229561,
+    "symmetry_median": 0.5430152931116558,
+    "symmetry_low": 0.2,
+    "support": 5,
+    "reference_count": 5,
+    "component": "",
+    "slot": "T3"
+  },
+  {
+    "retention_time_min": 2.45166666666667,
+    "rt_tolerance_min": 0.12258333333333352,
+    "width_median_min": 0.36957943756726447,
+    "width_low_min": 0.2668424461723955,
+    "width_high_min": 0.49704165191298233,
+    "symmetry_median": 0.8643677766563905,
+    "symmetry_low": 0.5773417514880684,
+    "support": 5,
+    "reference_count": 5,
+    "component": "",
+    "slot": "T4"
+  },
+  {
+    "retention_time_min": 3.004166666666665,
+    "rt_tolerance_min": 0.15020833333333328,
+    "width_median_min": 0.3478304314949353,
+    "width_low_min": 0.2552422384618391,
+    "width_high_min": 0.46249469737903487,
+    "symmetry_median": 0.8289060955908627,
+    "symmetry_low": 0.5755682621102883,
+    "support": 4,
+    "reference_count": 4,
+    "component": "",
+    "slot": "T5"
+  },
+  {
+    "retention_time_min": 4.24833333333333,
+    "rt_tolerance_min": 0.21241666666666653,
+    "width_median_min": 0.43085927221391535,
+    "width_low_min": 0.31697334166481295,
+    "width_high_min": 0.5840503405570806,
+    "symmetry_median": 0.9282397508360162,
+    "symmetry_low": 0.6414731239491405,
+    "support": 5,
+    "reference_count": 5,
+    "component": "",
+    "slot": "T6"
+  }
+]
