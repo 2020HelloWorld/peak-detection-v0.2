@@ -1,0 +1,10 @@
+{
+  "confirmation_threshold": 0.75,
+  "artifact_threshold": 0.45,
+  "normal_relative_prominence_floor": 0.0008,
+  "high_noise_relative_prominence_floor": 0.01,
+  "negative_bilateral_depth_floor": 0.005,
+  "negative_signed_depth_floor": 0.008,
+  "high_noise_negative_bilateral_floor": 0.01,
+  "high_noise_negative_signed_floor": 0.02
+}

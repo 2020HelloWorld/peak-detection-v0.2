@@ -1,7 +1,0 @@
-﻿folder,file,sha256,status,peak_count,error
-1-基准谱图类型,2-819机型-基准2#标气.CSV,3897da10afc06ee730ca90774e59b706911a65cabf4dee0eab40930fd0d3841f,ok,3,
-2-鼓包谱图类型,A1-C2H2鼓包.CSV,22d6f1a49fae7304336befc8dd0e742a3d32ad00566d17ab5d11edc7afbdc1bd,ok,1,
-2-鼓包谱图类型,A10-CH4赶在鼓包上.CSV,4aff20874b5e38909dd8ce7e78a2bc9da0f6c5db216bbce28f21435c3c0bc0ac,ok,3,
-3-噪音谱图类型,B10-1噪音、波动比较多，识别成C2H2.CSV,ab5fa41fb647ab53c648ef18c6943b623d47cc969e23799accf7807011a92ba4,ok,2,
-5-电信号干扰类型,H3-C2H2位置受干扰-峰比较对称.CSV,332d5fa256f933934109cc08fdffa578a3b10030c30456c330c29c934a8b20ca,ok,3,
-4-负峰类型,F1-H2负峰-处理.CSV,0e0424a5f13042a70f4916a0a71fc92222bde862636f50f7f063b9c1069fb88f,ok,15,

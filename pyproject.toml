@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "chrompeak-detector"
+version = "0.3.0"
+description = "Robust one-dimensional chromatogram peak detection and morphology classification"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "numpy==2.5.1",
+  "pandas==3.0.3",
+  "scipy==1.18.0",
+  "matplotlib==3.11.0",
+  "pybaselines==1.2.1"
+]
+
+[project.scripts]
+chrompeak = "chrompeak.detector:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
