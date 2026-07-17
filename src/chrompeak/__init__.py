@@ -1,3 +1,3 @@
 """ChromPeak: robust one-dimensional chromatogram peak detection."""
 
-__version__ = "0.3.0"
+__version__ = "0.4.1"

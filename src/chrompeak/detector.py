@@ -154,9 +154,10 @@ FEATURE_TYPE_CN = {
     "broad_or_overlapped_peak": "宽峰或未分离重叠峰",
     "broad_positive_peak": "宽正峰",
     "broad_hump_or_baseline": "宽鼓包、宽峰或基线",
+    "gentle_broad_peak_candidate": "平缓宽峰候选",
     "electrical_interference_candidate": "电信号干扰候选",
-    "electrical_spike": "正向电尖峰",
-    "negative_electrical_spike": "负向电尖峰",
+    "electrical_spike": "正向毛刺/电尖峰",
+    "negative_electrical_spike": "负向毛刺/电尖峰",
     "negative_peak": "负峰",
     "broad_negative_peak": "宽负峰",
     "interpeak_valley_or_negative_peak": "峰间谷底或负峰",
@@ -596,6 +597,30 @@ def high_noise_condition(processed: Preprocessed, reference_noise: float) -> boo
     return processed.global_noise > max(10.0 * max(reference_noise, EPS), 5e-5)
 
 
+def is_gentle_broad_peak_candidate(feature: dict, slot: dict | None) -> bool:
+    """Conservatively distinguish a smooth, slow peak from obvious drift.
+
+    This rule intentionally applies only outside learned component windows.
+    Inside a template window, an abnormally wide event remains a broad or
+    overlapped candidate until a future deconvolution stage can separate it.
+    """
+    width_to_fwhm = feature["width_min"] / max(feature["fwhm_min"], EPS)
+    return bool(
+        slot is None
+        and not feature["impulse_overlap"]
+        and feature["width_min"] >= 0.80
+        and feature["fwhm_min"] >= 0.30
+        and width_to_fwhm <= 6.0
+        and feature["symmetry"] >= 0.25
+        and feature["top_width_ratio"] <= 0.65
+        and feature["relative_prominence"] >= 0.003
+        and feature["snr"] >= 8.0
+        and feature["baseline_change_ratio"] <= 3.0
+        and feature["bilateral_depth_relative"] >= 0.002
+        and feature["edge_distance_min"] >= max(0.12, 0.5 * feature["width_min"])
+    )
+
+
 def classify_curve(
     curve: Curve,
     processed: Preprocessed,
@@ -662,7 +687,11 @@ def classify_curve(
                 feature_type = "electrical_spike"
                 scores["peak_confidence"] *= 0.25
             elif feature["width_min"] > 0.80:
-                feature_type = "broad_hump_or_baseline"
+                feature_type = (
+                    "gentle_broad_peak_candidate"
+                    if is_gentle_broad_peak_candidate(feature, slot)
+                    else "broad_hump_or_baseline"
+                )
                 scores["peak_confidence"] *= 0.80
             elif scores["score_width"] >= 0.45 and feature["symmetry"] >= 0.20:
                 feature_type = "unassigned_positive_peak"
@@ -680,6 +709,8 @@ def classify_curve(
         reasons = confidence_reasons(scores, template_confidence, rt_score, config)
         if feature["baseline_change_ratio"] >= 0.25:
             reasons.append("local_baseline_changes_across_peak")
+        if feature_type == "gentle_broad_peak_candidate":
+            reasons.append("conservative_gentle_broad_peak_rule")
         if feature["impulse_overlap"]:
             reasons.append("impulse_overlap_penalty")
         if feature["edge_distance_min"] < max(0.12, 0.5 * feature["width_min"]):
@@ -871,6 +902,172 @@ def feature_rows(curve: Curve, classified: list[dict]) -> list[dict]:
     return rows
 
 
+def _annotation_priority(row: dict) -> int:
+    if row["status"] == "confirmed":
+        return 6
+    if row["template_slot"]:
+        return 5
+    if row["feature_type"] == "gentle_broad_peak_candidate" or "electrical" in row["feature_type"]:
+        return 4
+    if row["feature_type"] in {"negative_peak", "broad_negative_peak"}:
+        return 3
+    return 2
+
+
+def _confirmed_boundary_specs(rows: list[dict]) -> list[dict]:
+    """Return validated plot specifications for confirmed peak boundaries only."""
+    specs: list[dict] = []
+    for row in rows:
+        if row["status"] != "confirmed":
+            continue
+        start = float(row["start_time_min"])
+        apex = float(row["apex_time_min"])
+        end = float(row["end_time_min"])
+        if not all(math.isfinite(value) for value in (start, apex, end)):
+            raise ValueError("Confirmed peak boundary contains a non-finite time")
+        if not start < end or not start <= apex <= end:
+            raise ValueError(
+                "Confirmed peak boundary must satisfy start < end and start <= apex <= end"
+            )
+        specs.append(
+            {
+                "folder": row.get("folder"),
+                "file": row.get("file"),
+                "feature_id": row.get("feature_id"),
+                "sign": row["sign"],
+                "start_time_min": start,
+                "apex_time_min": apex,
+                "end_time_min": end,
+                "text": f"起 {start:.4f} / 止 {end:.4f} min",
+            }
+        )
+    return specs
+
+
+def _place_peak_annotations(axis, specs: list[dict]) -> None:
+    """Place labels into non-overlapping axes-fraction rails.
+
+    Text width is measured by Matplotlib's renderer, converted back to time
+    units, and used for interval scheduling. This is deterministic, avoids a
+    third-party layout dependency, and remains readable for very dense traces.
+    """
+    if not specs:
+        return
+    count = len(specs)
+    fontsize = 7.0 if count <= 15 else 6.5 if count <= 30 else 6.0
+    annotations: list[tuple[object, dict]] = []
+    for spec in specs:
+        annotation = axis.annotate(
+            spec["text"],
+            (spec["x"], spec["y"]),
+            xytext=(spec["x"], 0.90 if spec["direction"] > 0 else 0.10),
+            textcoords=axis.get_xaxis_transform(),
+            ha="center",
+            va="center",
+            fontsize=fontsize,
+            linespacing=0.95,
+            annotation_clip=True,
+            bbox={
+                "boxstyle": "round,pad=0.14",
+                "facecolor": "white",
+                "edgecolor": "none",
+                "alpha": 0.78,
+            },
+            arrowprops={
+                "arrowstyle": "-",
+                "color": spec["color"],
+                "lw": 0.45,
+                "alpha": 0.65,
+                "shrinkA": 1.5,
+                "shrinkB": 2.0,
+            },
+            zorder=7,
+        )
+        annotations.append((annotation, spec))
+
+    figure = axis.figure
+    figure.canvas.draw()
+    renderer = figure.canvas.get_renderer()
+    axes_box = axis.get_window_extent(renderer)
+    x_low, x_high = axis.get_xlim()
+    data_per_pixel = (x_high - x_low) / max(axes_box.width, 1.0)
+    rail_positions = {
+        "top": [0.91, 0.79, 0.67, 0.55],
+        "bottom": [0.09, 0.21, 0.33, 0.45],
+    }
+    occupied: dict[tuple[str, int], list[tuple[float, float]]] = {
+        (side, index): []
+        for side, rails in rail_positions.items()
+        for index in range(len(rails))
+    }
+    ordered = sorted(
+        annotations,
+        key=lambda item: (-item[1]["priority"], item[1]["x"]),
+    )
+    for annotation, spec in ordered:
+        initial_box = annotation.get_bbox_patch().get_window_extent(renderer)
+        half_width = 0.5 * initial_box.width * data_per_pixel
+        padding = 6.0 * data_per_pixel
+        preferred = "top" if spec["direction"] > 0 else "bottom"
+        side_order = [preferred, "bottom" if preferred == "top" else "top"]
+        shift_unit = max(2.0 * half_width + padding, 0.025 * (x_high - x_low))
+        shifts = [0.0, -0.75, 0.75, -1.5, 1.5, -2.25, 2.25, -3.0, 3.0]
+        placed = False
+        for side in side_order:
+            for rail_index, rail_y in enumerate(rail_positions[side]):
+                intervals = occupied[(side, rail_index)]
+                for shift in shifts:
+                    label_x = float(
+                        np.clip(
+                            spec["x"] + shift * shift_unit,
+                            x_low + half_width + padding,
+                            x_high - half_width - padding,
+                        )
+                    )
+                    interval = (
+                        label_x - half_width - padding,
+                        label_x + half_width + padding,
+                    )
+                    if any(interval[0] < right and interval[1] > left for left, right in intervals):
+                        continue
+                    annotation.set_position((label_x, rail_y))
+                    annotation.update_positions(renderer)
+                    intervals.append(interval)
+                    intervals.sort()
+                    placed = True
+                    break
+                if placed:
+                    break
+            if placed:
+                break
+        if not placed:
+            if spec.get("required", False):
+                # Confirmed labels contain the requested start/end values and
+                # must remain visible. This fallback is only reached if every
+                # collision-free rail is full; confirmed labels are otherwise
+                # placed first because they have the highest priority.
+                fallback_side = preferred
+                fallback_index = min(
+                    range(len(rail_positions[fallback_side])),
+                    key=lambda index: len(occupied[(fallback_side, index)]),
+                )
+                fallback_x = float(
+                    np.clip(
+                        spec["x"],
+                        x_low + half_width + padding,
+                        x_high - half_width - padding,
+                    )
+                )
+                annotation.set_position(
+                    (fallback_x, rail_positions[fallback_side][fallback_index])
+                )
+                annotation.update_positions(renderer)
+            else:
+                # The symbol and complete CSV row remain even when a
+                # lower-priority text rail is full.
+                annotation.set_visible(False)
+
+
 def plot_result(
     curve: Curve,
     processed: Preprocessed,
@@ -878,10 +1075,33 @@ def plot_result(
     template: list[dict],
     output: Path,
 ) -> None:
-    fig, axes = plt.subplots(2, 1, figsize=(14, 7), sharex=True)
-    axes[0].plot(curve.x, curve.y, color="0.30", lw=0.75, label="raw")
-    axes[0].plot(curve.x, processed.baseline, color="#d62728", lw=1.0, label="arPLS baseline")
-    axes[0].plot(
+    fig, axes = plt.subplots(
+        3,
+        1,
+        figsize=(14, 9),
+        sharex=True,
+        gridspec_kw={"height_ratios": [1.0, 1.0, 1.25]},
+    )
+
+    # curve.y is the Curvel column read directly from the CSV. This panel is
+    # intentionally raw-only: no filtering, smoothing, impulse replacement,
+    # or baseline subtraction is applied to the displayed line.
+    axes[0].plot(curve.x, curve.y, color="0.25", lw=0.75, label="raw samples (unprocessed)")
+    axes[0].legend(loc="best", fontsize=8)
+    axes[0].set_ylabel("raw signal")
+    axes[0].set_title(f"{curve.key}\nraw CSV trace (no preprocessing)")
+
+    # Preprocessing diagnostics are separate from the raw-only panel so the
+    # baseline estimates cannot be mistaken for original measurements.
+    axes[1].plot(curve.x, curve.y, color="0.75", lw=0.65, label="raw reference")
+    axes[1].plot(
+        curve.x,
+        processed.baseline,
+        color="#d62728",
+        lw=1.0,
+        label="robust main baseline",
+    )
+    axes[1].plot(
         curve.x,
         processed.hump_baseline,
         color="#9467bd",
@@ -889,82 +1109,194 @@ def plot_result(
         alpha=0.75,
         label="rolling-ball local background",
     )
-    axes[0].legend(loc="best", fontsize=8)
-    axes[0].set_ylabel("signal")
-    axes[0].set_title(curve.key)
+    axes[1].legend(loc="best", fontsize=8)
+    axes[1].set_ylabel("signal / baseline")
 
-    axes[1].plot(curve.x, processed.positive, color="#1f77b4", lw=0.8, label="preprocessed positive")
-    axes[1].plot(curve.x, processed.signed, color="0.55", lw=0.55, alpha=0.75, label="signed branch")
+    detection_axis = axes[2]
+    detection_axis.plot(
+        curve.x,
+        processed.positive,
+        color="#1f77b4",
+        lw=0.8,
+        label="preprocessed positive",
+    )
+    detection_axis.plot(
+        curve.x,
+        processed.signed,
+        color="0.55",
+        lw=0.55,
+        alpha=0.75,
+        label="signed branch",
+    )
     for slot in template:
-        axes[1].axvspan(
+        detection_axis.axvspan(
             slot["retention_time_min"] - slot["rt_tolerance_min"],
             slot["retention_time_min"] + slot["rt_tolerance_min"],
             color="#2ca02c",
             alpha=0.045,
         )
+    confirmed_boundaries = {
+        int(spec["feature_id"]): spec
+        for spec in _confirmed_boundary_specs(rows)
+        if spec["feature_id"] is not None
+    }
     styles = {
-        "confirmed": ("#2ca02c", "o"),
-        "review": ("#ff7f0e", "^"),
-        "artifact": ("#d62728", "x"),
+        "confirmed": ("#2ca02c", "o", "confirmed"),
+        "review": ("#ff7f0e", "^", "review"),
+        "artifact": ("#d62728", "x", "artifact / interference"),
+        "likely_noise": ("#7f7f7f", "D", "likely noise"),
     }
     short_plot_names = {
+        "normal_positive_peak": "正峰",
+        "narrow_positive_peak": "窄正峰",
         "unassigned_positive_peak": "未映射正峰",
+        "positive_peak_on_hump": "鼓包上小峰",
+        "overlapping_positive_peak": "重叠正峰",
         "secondary_or_overlapping_candidate": "次峰/重叠候选",
         "broad_or_overlapped_peak": "宽峰/重叠峰",
+        "broad_positive_peak": "宽正峰",
         "broad_hump_or_baseline": "宽峰/基线",
+        "gentle_broad_peak_candidate": "平缓宽峰候选",
+        "negative_peak": "负峰",
+        "broad_negative_peak": "宽负峰",
         "interpeak_valley_or_negative_peak": "谷底/负峰",
         "electrical_interference_candidate": "电干扰",
+        "electrical_spike": "正向毛刺/电尖峰",
+        "negative_electrical_spike": "负向毛刺/电尖峰",
         "uncertain_peak_or_noise": "峰/噪声",
     }
     used: set[str] = set()
-    last_annotation_time = -float("inf")
-    annotation_level = 0
+    annotation_specs: list[dict] = []
     for row in rows:
-        color, marker = styles[row["status"]]
+        plot_class = row["status"]
+        if row["status"] == "artifact" and row["feature_type"] == "uncertain_peak_or_noise":
+            plot_class = "likely_noise"
+        color, marker, legend_text = styles[plot_class]
         y_value = np.interp(row["apex_time_min"], curve.x, processed.positive)
         if row["sign"] == "negative":
             y_value = np.interp(row["apex_time_min"], curve.x, processed.signed)
-        label = row["status"] if row["status"] not in used else None
-        used.add(row["status"])
-        axes[1].scatter(row["apex_time_min"], y_value, c=color, marker=marker, s=28, label=label, zorder=5)
+        boundary = confirmed_boundaries.get(int(row["feature_id"]))
+        if boundary is not None:
+            boundary_signal = (
+                processed.positive if boundary["sign"] == "positive" else processed.signed
+            )
+            start_y = float(
+                np.interp(boundary["start_time_min"], curve.x, boundary_signal)
+            )
+            end_y = float(np.interp(boundary["end_time_min"], curve.x, boundary_signal))
+            boundary_label = (
+                "confirmed boundary: start > / < end"
+                if "confirmed_boundary" not in used
+                else None
+            )
+            used.add("confirmed_boundary")
+            # The two hollow markers point inward. They identify the exact
+            # algorithmic boundary samples without drawing full-height lines
+            # or shading very wide automatic windows across the whole plot.
+            detection_axis.scatter(
+                boundary["start_time_min"],
+                start_y,
+                marker=">",
+                s=34,
+                facecolors="white",
+                edgecolors="#00897b",
+                linewidths=0.9,
+                label=boundary_label,
+                zorder=5,
+            )
+            detection_axis.scatter(
+                boundary["end_time_min"],
+                end_y,
+                marker="<",
+                s=34,
+                facecolors="white",
+                edgecolors="#00897b",
+                linewidths=0.9,
+                zorder=5,
+            )
+        label = legend_text if plot_class not in used else None
+        used.add(plot_class)
+        detection_axis.scatter(
+            row["apex_time_min"],
+            y_value,
+            c=color,
+            marker=marker,
+            s=28,
+            label=label,
+            zorder=5,
+        )
+        if row["feature_type"] == "gentle_broad_peak_candidate":
+            gentle_label = "gentle broad peak candidate" if "gentle_type" not in used else None
+            used.add("gentle_type")
+            detection_axis.scatter(
+                row["apex_time_min"],
+                y_value,
+                facecolors="none",
+                edgecolors="#9467bd",
+                marker="s",
+                s=62,
+                linewidths=1.15,
+                label=gentle_label,
+                zorder=6,
+            )
         annotate = (
             row["status"] == "confirmed"
             or bool(row["template_slot"])
-            or row["relative_prominence"] >= 0.003
-            or "negative_peak" in row["feature_type"]
+            or row["feature_type"] == "gentle_broad_peak_candidate"
             or "electrical" in row["feature_type"]
+            or row["feature_type"] in {
+                "negative_peak",
+                "broad_negative_peak",
+                "negative_electrical_spike",
+            }
+            or (
+                row["feature_type"] == "interpeak_valley_or_negative_peak"
+                and row["relative_prominence"] >= 0.02
+            )
+            or (row["status"] == "review" and row["relative_prominence"] >= 0.01)
         )
         if annotate:
-            if row["apex_time_min"] - last_annotation_time < 0.28:
-                annotation_level = (annotation_level + 1) % 4
+            short_type = short_plot_names.get(row["feature_type"], row["feature_type_cn"])
+            if row["feature_type"] in {
+                "gentle_broad_peak_candidate",
+                "electrical_interference_candidate",
+                "electrical_spike",
+                "negative_electrical_spike",
+            }:
+                base_text = short_type
             else:
-                annotation_level = 0
-            last_annotation_time = row["apex_time_min"]
-            base_text = (
-                row["component"]
-                or row["template_slot"]
-                or short_plot_names.get(row["feature_type"], row["feature_type_cn"])
+                base_text = row["component"] or row["template_slot"] or short_type
+            annotation_text = f"{base_text}\n{row['peak_confidence_percent']:.0f}%"
+            if boundary is not None:
+                annotation_text = (
+                    f"{base_text} {row['peak_confidence_percent']:.0f}%\n"
+                    f"{boundary['text']}"
+                )
+            annotation_specs.append(
+                {
+                    "text": annotation_text,
+                    "x": row["apex_time_min"],
+                    "y": y_value,
+                    "direction": -1 if row["sign"] == "negative" else 1,
+                    "priority": _annotation_priority(row),
+                    "color": color,
+                    "required": boundary is not None,
+                }
             )
-            text = f"{base_text} {row['peak_confidence_percent']:.0f}%"
-            direction = 1 if y_value >= 0 else -1
-            offset = direction * (7 + 11 * annotation_level)
-            axes[1].annotate(
-                text,
-                (row["apex_time_min"], y_value),
-                xytext=(0, offset),
-                textcoords="offset points",
-                ha="center",
-                va="bottom" if direction > 0 else "top",
-                fontsize=7,
-            )
-    axes[1].axhline(0, color="0.25", lw=0.5)
-    lower, upper = axes[1].get_ylim()
-    label_padding = 0.12 * max(upper - lower, EPS)
-    axes[1].set_ylim(lower - label_padding, upper + label_padding)
-    axes[1].set_xlabel("time (min)")
-    axes[1].set_ylabel("corrected signal")
-    axes[1].legend(loc="best", fontsize=8, ncol=4)
+    detection_axis.axhline(0, color="0.25", lw=0.5)
+    lower, upper = detection_axis.get_ylim()
+    label_padding = 0.18 * max(upper - lower, EPS)
+    detection_axis.set_ylim(lower - label_padding, upper + label_padding)
+    detection_axis.set_xlabel("time (min)")
+    detection_axis.set_ylabel("corrected signal")
+    detection_axis.legend(
+        loc="lower center",
+        bbox_to_anchor=(0.5, 1.01),
+        fontsize=7.2,
+        ncol=6,
+    )
     fig.tight_layout()
+    _place_peak_annotations(detection_axis, annotation_specs)
     fig.savefig(output, dpi=150)
     plt.close(fig)
 

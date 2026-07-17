@@ -12,7 +12,9 @@ sys.path.insert(0, str(PROJECT_ROOT / "src"))
 
 from chrompeak.detector import (
     DetectorConfig,
+    _confirmed_boundary_specs,
     classify_curve,
+    feature_rows,
     high_noise_condition,
     independent_curves,
     preprocess,
@@ -70,6 +72,44 @@ class DetectorSmokeTest(unittest.TestCase):
         self.assertEqual("electrical_interference_candidate", event["feature_type"])
         self.assertEqual("artifact", event["status"])
         self.assertLess(event["peak_confidence"], self.config.artifact_threshold)
+
+    def test_conservative_gentle_broad_peak_candidate(self) -> None:
+        rows = self.classify("F3-CO2")
+        event = min(rows, key=lambda row: abs(row["apex_time_min"] - 2.6633))
+        self.assertEqual("gentle_broad_peak_candidate", event["feature_type"])
+        self.assertEqual("review", event["status"])
+
+    def test_positive_electrical_spike_is_an_artifact(self) -> None:
+        rows = self.classify("H1-")
+        event = min(rows, key=lambda row: abs(row["apex_time_min"] - 3.9333))
+        self.assertEqual("electrical_spike", event["feature_type"])
+        self.assertEqual("artifact", event["status"])
+
+    def test_plot_boundaries_are_emitted_for_confirmed_peaks_only(self) -> None:
+        selected_rows: list[dict] = []
+        for prefix in ("F1-H2", "F3-CO2", "H1-"):
+            curve = next(curve for curve in self.curves if curve.name.startswith(prefix))
+            selected_rows.extend(feature_rows(curve, self.classify(prefix)))
+
+        specs = _confirmed_boundary_specs(selected_rows)
+        confirmed = [row for row in selected_rows if row["status"] == "confirmed"]
+        self.assertEqual(len(confirmed), len(specs))
+        self.assertTrue(specs)
+        for spec in specs:
+            self.assertLess(spec["start_time_min"], spec["end_time_min"])
+            self.assertLessEqual(spec["start_time_min"], spec["apex_time_min"])
+            self.assertLessEqual(spec["apex_time_min"], spec["end_time_min"])
+            self.assertIn("起 ", spec["text"])
+            self.assertIn("止 ", spec["text"])
+            self.assertTrue(spec["text"].endswith(" min"))
+
+        excluded = {
+            (row["file"], row["feature_id"])
+            for row in selected_rows
+            if row["status"] != "confirmed"
+        }
+        plotted = {(spec["file"], spec["feature_id"]) for spec in specs}
+        self.assertTrue(excluded.isdisjoint(plotted))
 
     def test_high_noise_flag_is_not_used_as_a_blanket_rejection(self) -> None:
         curve = next(curve for curve in self.curves if curve.name.startswith("B10-"))
