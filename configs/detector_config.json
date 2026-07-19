@@ -6,5 +6,13 @@
   "negative_bilateral_depth_floor": 0.005,
   "negative_signed_depth_floor": 0.008,
   "high_noise_negative_bilateral_floor": 0.01,
-  "high_noise_negative_signed_floor": 0.02
+  "high_noise_negative_signed_floor": 0.02,
+  "hump_relative_prominence_floor": 0.005,
+  "hump_weak_density_limit": 2,
+  "hump_density_radius_min": 0.5,
+  "hump_bilateral_depth_floor": 0.0015,
+  "hump_candidate_width_limit_min": 0.8,
+  "electrical_spike_score_threshold": 0.45,
+  "apex_spike_peak_body_floor": 0.72,
+  "apex_spike_confidence_multiplier": 0.9
 }

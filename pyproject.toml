@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "chrompeak-detector"
-version = "0.4.1"
+version = "0.5.2"
 description = "Robust one-dimensional chromatogram peak detection and morphology classification"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -14,6 +14,12 @@ dependencies = [
   "scipy==1.18.0",
   "matplotlib==3.11.0",
   "pybaselines==1.2.1"
+]
+
+[project.optional-dependencies]
+reports = [
+  "python-pptx==1.0.2",
+  "python-docx==1.2.0"
 ]
 
 [project.scripts]
